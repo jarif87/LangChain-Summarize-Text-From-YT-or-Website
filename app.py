@@ -39,7 +39,7 @@ try:
         f.write(cookie_content)
 except Exception as e:
     print(f"Error processing cookies: {e}")
-
+    
 # Load environment variables
 load_dotenv()
 
@@ -69,36 +69,58 @@ Focus on the main points and key insights. Write in a professional tone.
 prompt = PromptTemplate(template=prompt_template, input_variables=["text"])
 
 def get_youtube_content(url):
-    """Get content from YouTube video using yt-dlp"""
+    """Get content from YouTube video"""
     try:
-        ydl_opts = {
-            'format': 'worst',
-            'extract_flat': True,
-            'quiet': True,
-            'no_warnings': True,
-            'cookiefile': 'youtube_cookies.txt'  # Use the cookies file we created
-        }
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+        # First try youtube-transcript-api
+        from youtube_transcript_api import YouTubeTranscriptApi
+        from urllib.parse import urlparse, parse_qs
+
+        # Extract video ID from URL
+        if 'youtube.com' in url:
+            video_id = parse_qs(urlparse(url).query)['v'][0]
+        elif 'youtu.be' in url:
+            video_id = urlparse(url).path[1:]
+        else:
+            raise ValueError("Not a valid YouTube URL")
+
+        try:
+            # Try getting transcript
+            transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
+            transcript_text = ' '.join([entry['text'] for entry in transcript_list])
+        except:
+            # Fallback to yt-dlp for description if transcript fails
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': True,
+            }
             
-            title = info.get('title', '')
-            description = info.get('description', '')
-            views = info.get('view_count', 'Unknown')
-            uploader = info.get('uploader', 'Unknown')
-            upload_date = info.get('upload_date', 'Unknown')
-            
-            content = f"""
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                try:
+                    video_info = ydl.extract_info(url, download=False)
+                    transcript_text = video_info.get('description', 'No description available')
+                except:
+                    transcript_text = "Could not extract video content."
+
+        # Get video info
+        response = requests.get(f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json")
+        if response.status_code == 200:
+            video_info = response.json()
+            title = video_info.get('title', '')
+            uploader = video_info.get('author_name', '')
+        else:
+            title = "Unknown Title"
+            uploader = "Unknown Uploader"
+
+        content = f"""
 Video Title: {title}
 Uploader: {uploader}
-Upload Date: {upload_date}
-Views: {views}
 
-Description:
-{description}
+Content:
+{transcript_text}
 """
-            return [Document(page_content=content)]
-            
+        return [Document(page_content=content)]
+
     except Exception as e:
         st.error(f"Error getting YouTube content: {str(e)}")
         return None
